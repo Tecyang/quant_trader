@@ -1,5 +1,6 @@
 import calendar
 import datetime
+from functools import wraps
 import logging
 import os
 import time
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 DB_FILE = "../data/tushare.db"
 
 
-class StockQuery():
+class StockQuery:
     def __init__(self, stock_code, start_date=None, end_date=None, baseline=None):
         self.stock_code = stock_code
         self.start_date = start_date
@@ -37,18 +38,31 @@ def compile_stock_code(stock_code):
     从 "600600=>600600.SH"
     股票编码：https://zhidao.baidu.com/question/340092837.html
     """
-    if stock_code.endswith(".SH") or stock_code.endswith(".SZ"): return stock_code
-    if stock_code.startswith("6"): return stock_code + ".SH"
+    if stock_code.endswith(".SH") or stock_code.endswith(".SZ"):
+        return stock_code
+    if stock_code.startswith("6"):
+        return stock_code + ".SH"
     return stock_code + ".SZ"
 
+def compile_stock_code_left(stock_code):
+    """
+    从 "600600=>sh.600600"
+    股票编码：https://zhidao.baidu.com/question/340092837.html
+    """
+    if stock_code.startswith("sh.") or stock_code.startswith("sz."):
+        return stock_code
+    if stock_code.startswith("6"):
+        return 'sh.'+stock_code  
+    return 'sz.'+stock_code 
 
 def uncompile_stock_code(stock_code):
     """
     从 "600600.SH=>600600"
     股票编码：https://zhidao.baidu.com/question/340092837.html
     """
-    if not "." in stock_code: return stock_code
-    return stock_code[:stock_code.index(".")]
+    if not "." in stock_code:
+        return stock_code
+    return stock_code[: stock_code.index(".")]
 
 
 def uncomply_code(func):
@@ -60,10 +74,12 @@ def uncomply_code(func):
 
     def wrapper_it(*args, **kw):
         import inspect
+
         args_spec = inspect.getfullargspec(func)
         args_names = args_spec.args
-        index = args_names.index('code') if 'code' in args_names else -1
-        if index == -1: return func(*args, **kw)
+        index = args_names.index("code") if "code" in args_names else -1
+        if index == -1:
+            return func(*args, **kw)
         args = list(args)
         args[index] = uncompile_stock_code(args[index])
         args = tuple(args)
@@ -74,8 +90,11 @@ def uncomply_code(func):
 
 def load_config():
     if not os.path.exists(conf.CONF_PATH):
-        raise ValueError("配置文件[conf/config.yml]不存在!(参考conf/config.sample.yml):" + conf.CONF_PATH)
-    f = open(conf.CONF_PATH, 'r', encoding='utf-8')
+        raise ValueError(
+            "配置文件[conf/config.yml]不存在!(参考conf/config.sample.yml):" +
+            conf.CONF_PATH
+        )
+    f = open(conf.CONF_PATH, "r", encoding="utf-8")
     result = f.read()
     # 转换成字典读出来
     data = yaml.load(result, Loader=yaml.FullLoader)
@@ -84,12 +103,16 @@ def load_config():
 
 
 def connect_db():
-    uid = utils.CONF['datasources']['mysql']['uid']
-    pwd = utils.CONF['datasources']['mysql']['pwd']
-    db = utils.CONF['datasources']['mysql']['db']
-    host = utils.CONF['datasources']['mysql']['host']
-    port = utils.CONF['datasources']['mysql']['port']
-    engine = create_engine("mysql+pymysql://{}:{}@{}:{}/{}?charset={}".format(uid, pwd, host, port, db, 'utf8'))
+    uid = utils.CONF["datasources"]["mysql"]["uid"]
+    pwd = utils.CONF["datasources"]["mysql"]["pwd"]
+    db = utils.CONF["datasources"]["mysql"]["db"]
+    host = utils.CONF["datasources"]["mysql"]["host"]
+    port = utils.CONF["datasources"]["mysql"]["port"]
+    engine = create_engine(
+        "mysql+pymysql://{}:{}@{}:{}/{}?charset={}".format(
+            uid, pwd, host, port, db, "utf8"
+        )
+    )
     # engine = create_engine('sqlite:///' + DB_FILE + '?check_same_thread=False', echo=echo)  # 是否显示SQL：, echo=True)
     return engine
 
@@ -132,15 +155,22 @@ def get_monthly_duration(start_date, end_date):
         for month in range(start_month, end_month):
 
             if start_date.year == year and start_date.month == month:
-                s_start_date = date2str(datetime.date(year=year, month=month, day=start_date.day))
+                s_start_date = date2str(
+                    datetime.date(year=year, month=month, day=start_date.day)
+                )
             else:
-                s_start_date = date2str(datetime.date(year=year, month=month, day=1))
+                s_start_date = date2str(datetime.date(
+                    year=year, month=month, day=1))
 
             if end_date.year == year and end_date.month == month:
-                s_end_date = date2str(datetime.date(year=year, month=month, day=end_date.day))
+                s_end_date = date2str(
+                    datetime.date(year=year, month=month, day=end_date.day)
+                )
             else:
                 _, last_day = calendar.monthrange(year, month)
-                s_end_date = date2str(datetime.date(year=year, month=month, day=last_day))
+                s_end_date = date2str(
+                    datetime.date(year=year, month=month, day=last_day)
+                )
 
             scopes.append([s_start_date, s_end_date])
 
@@ -155,7 +185,7 @@ def get_yearly_duration(start_date, end_date):
     start_date = str2date(start_date)
     end_date = str2date(end_date)
     years = list(range(start_date.year, end_date.year + 1))
-    scopes = [[f'{year}0101', f'{year}1231'] for year in years]
+    scopes = [[f"{year}0101", f"{year}1231"] for year in years]
 
     if start_date.year == years[0]:
         scopes[0][0] = date2str(start_date)
@@ -165,21 +195,49 @@ def get_yearly_duration(start_date, end_date):
     return scopes
 
 
-def duration(start, end, unit='day'):
+def duration(start, end, unit="day"):
     d0 = utils.utils.str2date(start)
     d1 = utils.utils.str2date(end)
     delta = d1 - d0
-    if unit == 'day': return delta.days
+    if unit == "day":
+        return delta.days
     return None
+
+def date_format(format='%Y%m%d'):
+    def date_format_dec(func):
+        """
+        一个包装器，用于方法中包含code的参数，把股票代码的后缀去掉（tushare是带后缀的，但是服务器不带）
+        从 "600600.SH=>600600"
+        这个用于把发往服务器的代码都统一成实盘代码
+        """
+        @wraps(func)
+        def wrapper_it(*args, **kw):
+            import inspect
+
+            args_spec = inspect.getfullargspec(func)
+            args_names = args_spec.args
+            args = list(args)
+            for a in ['start_date','end_date','signal_date']:
+                index = args_names.index(a) if a in args_names else -1
+                if index == -1:
+                    continue
+                args[index] =time.strftime(format,time.strptime(args[index],'%Y%m%d'))
+                args = tuple(args)
+            return func(*args, **kw)
+        return wrapper_it
+    return date_format_dec
+    
 
 
 def tomorrow(s_date=None):
-    if s_date is None: s_date = today()
-    return future('day', 1, s_date)
+    if s_date is None:
+        s_date = today()
+    return future("day", 1, s_date)
 
 
 def yesterday(s_date=None):
-    if s_date is None: s_date = today()
+    if s_date is None:
+        s_date = today()
     return last_day(s_date, 1)
 
 
@@ -188,19 +246,19 @@ def last(date_type, unit, s_date):
 
 
 def last_year(s_date, num=1):
-    return last('year', num, s_date)
+    return last("year", num, s_date)
 
 
 def last_month(s_date, num=1):
-    return last('month', num, s_date)
+    return last("month", num, s_date)
 
 
 def last_week(s_date, num=1):
-    return last('week', num, s_date)
+    return last("week", num, s_date)
 
 
 def last_day(s_date, num=1):
-    return last('day', num, s_date)
+    return last("day", num, s_date)
 
 
 def today():
@@ -229,13 +287,13 @@ def __date_span(date_type, unit, direction, s_date):
     :return:
     """
     the_date = str2date(s_date)
-    if date_type == 'year':
+    if date_type == "year":
         return date2str(the_date + relativedelta(years=unit) * direction)
-    elif date_type == 'month':
+    elif date_type == "month":
         return date2str(the_date + relativedelta(months=unit) * direction)
-    elif date_type == 'week':
+    elif date_type == "week":
         return date2str(the_date + relativedelta(weeks=unit) * direction)
-    elif date_type == 'day':
+    elif date_type == "day":
         return date2str(the_date + relativedelta(days=unit) * direction)
     else:
         raise ValueError(f"无法识别的date_type:{date_type}")
@@ -246,7 +304,8 @@ def date2str(date, format="%Y%m%d"):
 
 
 def dataframe2series(df):
-    if type(df) == Series: return df
+    if type(df) == Series:
+        return df
     assert len(df.columns) == 1, df.columns
     return df.iloc[:, 0]
 
@@ -295,7 +354,7 @@ def get_holidays(from_year=2004, include_weekends=False):
     return holidays
 
 
-def get_period_ohlc(df_day, date, unit=4, unit_type='W'):
+def get_period_ohlc(df_day, date, unit=4, unit_type="W"):
     """
     计算4周前这段时间的OHLC,
     这个必须要用day2week,day2month出来的结果，因为里面有这周的开始和结束
@@ -304,21 +363,23 @@ def get_period_ohlc(df_day, date, unit=4, unit_type='W'):
     # 得到4周前的第一个工作日
     date_index = df_day.index
     # import pdb;pdb.set_trace()
-    four_week_ago_first_weekday = \
-        date_index[
-            date_index > (date - pd.to_timedelta(unit, unit=unit_type)).to_period(unit_type).start_time
-            ][0]
+    four_week_ago_first_weekday = date_index[
+        date_index
+        > (date - pd.to_timedelta(unit, unit=unit_type)).to_period(unit_type).start_time
+    ][0]
 
     df_period = df_day.loc[four_week_ago_first_weekday:date]
     df_result = pd.DataFrame()
-    df_result['open'] = df_period.iloc[0]['open']
-    df_result['close'] = df_period.iloc[-1]['close']
-    df_result['high'] = df_period['high'].max()
-    df_result['low'] = df_period['low'].min()
-    df_result['volume'] = df_period['volume'].sum()
-    df_result['from'] = df_period.head(1).index
-    df_result['to'] = df_result.index
-    df_result['pct_chg'] = (df_period.iloc[-1]['close'] - df_period.iloc[0]['open']) / df_period.iloc[0]['open']
+    df_result["open"] = df_period.iloc[0]["open"]
+    df_result["close"] = df_period.iloc[-1]["close"]
+    df_result["high"] = df_period["high"].max()
+    df_result["low"] = df_period["low"].min()
+    df_result["volume"] = df_period["volume"].sum()
+    df_result["from"] = df_period.head(1).index
+    df_result["to"] = df_result.index
+    df_result["pct_chg"] = (
+        df_period.iloc[-1]["close"] - df_period.iloc[0]["open"]
+    ) / df_period.iloc[0]["open"]
 
     return df_result
 
@@ -336,26 +397,29 @@ def init_logger(file=False, simple=False):
 
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger('matplotlib.font_manager').disabled = True
-    logging.getLogger('matplotlib.colorbar').disabled = True
-    logging.getLogger('matplotlib').disabled = True
-    logging.getLogger('fontTools.ttLib.ttFont').disabled = True
-    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger("matplotlib.font_manager").disabled = True
+    logging.getLogger("matplotlib.colorbar").disabled = True
+    logging.getLogger("matplotlib").disabled = True
+    logging.getLogger("fontTools.ttLib.ttFont").disabled = True
+    logging.getLogger("PIL").setLevel(logging.WARNING)
     warnings.filterwarnings("ignore")
     warnings.filterwarnings("ignore", module="matplotlib")
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
     if simple:
-        formatter = logging.Formatter('%(message)s')
+        formatter = logging.Formatter("%(message)s")
     else:
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d P%(process)d: %(message)s')
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d P%(process)d: %(message)s"
+        )
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level=logging.DEBUG)
 
     def is_any_handler(handlers, cls):
         for t in handlers:
-            if type(t) == cls: return True
+            if type(t) == cls:
+                return True
         return False
 
     # 加入控制台
@@ -366,9 +430,12 @@ def init_logger(file=False, simple=False):
 
     # 加入日志文件
     if file and not is_any_handler(root_logger.handlers, logging.FileHandler):
-        if not os.path.exists("./logs"): os.makedirs("./logs")
-        filename = "./logs/{}.log".format(time.strftime('%Y%m%d%H%M', time.localtime(time.time())))
-        t_handler = logging.FileHandler(filename, encoding='utf-8')
+        if not os.path.exists("./logs"):
+            os.makedirs("./logs")
+        filename = "./logs/{}.log".format(
+            time.strftime("%Y%m%d%H%M", time.localtime(time.time()))
+        )
+        t_handler = logging.FileHandler(filename, encoding="utf-8")
         root_logger.addHandler(t_handler)
         print("日志：创建文件处理器", filename)
 
@@ -380,11 +447,11 @@ def init_logger(file=False, simple=False):
 
 def get_url(host=None, port=None, url=None, token=None):
     if host is None:
-        host = utils.CONF['broker_client']['host']
-        port = utils.CONF['broker_client']['port']
-        url = utils.CONF['broker_client']['url']
-        token = utils.CONF['broker_client']['token']
-    return f"http://{host}:{port}/{url}?token={token}"
+        host = utils.CONF["broker_client"]["host"]
+        port = utils.CONF["broker_client"]["port"]
+        url = utils.CONF["broker_client"]["url"]
+        token = utils.CONF["broker_client"]["token"]
+    return f"http://{host}:{port}/{url}?token={token}&broker=ths_mac"
 
 
 class AStockPlotScheme(Tradimo):
@@ -406,16 +473,21 @@ class AStockPlotScheme(Tradimo):
 
 def http_json_post(url, dict_msg):
     logger.debug("向[%s]推送消息：%r", url, dict_msg)
-    headers = {'Content-Type': 'application/json'}
+    headers = {"Content-Type": "application/json"}
     response = requests.post(url, json=dict_msg, headers=headers)
-    logger.info('接口返回原始报文:%r', response.text if len(response.text) < 50 else response.text[:50] + "......")
+    logger.info(
+        "接口返回原始报文:%r",
+        response.text if len(
+            response.text) < 50 else response.text[:50] + "......",
+    )
+    print(response.text)
     data = response.json()
-    logger.info('接口返回Json报文:%r', data)
+    # logger.info("接口返回Json报文:%r", data)
     return data
 
 
 def tushare_api():
-    token = utils.CONF['datasources']['tushare']['token']
+    token = utils.CONF["datasources"]["tushare"]["token"]
     return tushare.pro_api(token)
 
 
@@ -424,14 +496,18 @@ def is_trade_day():
     判断是不是交易时间：9：30~11:30
     :return:
     """
-    trade_dates = list(tushare_api().trade_cal(start_date=utils.last_week(utils.today()), end_date=utils.today()))
+    trade_dates = list(
+        tushare_api().trade_cal(
+            start_date=utils.last_week(utils.today()), end_date=utils.today()
+        )
+    )
     if utils.today() in trade_dates:
         return True
     return False
 
 
 def is_trade_time():
-    FMT = '%H:%M:%S'
+    FMT = "%H:%M:%S"
     now = datetime.datetime.strftime(datetime.datetime.now(), FMT)
     time_0930 = "09:30:00"
     time_1130 = "11:30:00"

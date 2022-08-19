@@ -36,8 +36,11 @@ class EaseTraderBroker(Broker):
 
         self.client = easytrader.use(client_type)
 
-        # 登录客户端，输入用户名和密码
-        self.client.prepare(user=uid, password=pwd, exe_path=exe_path)
+        if client_type == 'ths_mac':
+            self.client.connect()
+        else:
+            # 登录客户端，输入用户名和密码
+            self.client.prepare(user=uid, password=pwd, exe_path=exe_path)
 
         self.client.enable_type_keys_for_editor()
         logger.info("登录了%s的%s类型客户端", current_broker_name, client_type)
@@ -75,7 +78,6 @@ class EaseTraderBroker(Broker):
         :return:
         """
 
-        self.connect()
         code = self.__format_code(code)
         result = self.client.market_buy(code, share)
         # 一定不要勾选掉买完后的对话框，里面包含着委托单号，这个非常重要，用于撤单和查询
@@ -91,7 +93,6 @@ class EaseTraderBroker(Broker):
             raise ValueError(msg)
 
     def sell(self, code, share):
-        self.connect()
         code = self.__format_code(code)
         result = self.client.market_sell(code, share)
         if type(result) == dict and 'entrust_no' in result.keys():

@@ -109,9 +109,10 @@ def api():
         if action == TRADE_BUY_NOW:
             code = params['code']
             share = params['share']
-
+            broker_name = request.args.get('broker')
             # 创建交易代理
             __broker = broker.get("easytrader")
+            __broker.connect(broker_name)
             entrust_no = __broker.buy(code, share)
 
             msg = "买股票[%s]请求，股数[%d]" % (code, share)
@@ -124,8 +125,12 @@ def api():
         if action == TRADE_SELL_NOW:
             code = params['code']
             share = params('share', None)
+            broker_name = request.args.get('broker')
+            __broker = broker.get("easytrader")
+            __broker.connect(broker_name)
             if share is None: share = 100
             __broker = broker.get("easytrader")
+            __broker.connect(broker_name)
             entrust_no = __broker.sell(code, share)
 
             msg = "卖股票[%s]请求，股数[%d]" % (code, share)

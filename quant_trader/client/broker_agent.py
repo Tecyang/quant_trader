@@ -1,9 +1,10 @@
 import logging
 import math
+import baostock as bs
 import pandas as pd
 from quant_trader.notification import notifier, WARN, INFO
 from quant_trader.utils import utils, CONF, db_utils
-from quant_trader.utils.utils import uncomply_code
+from quant_trader.utils.utils import uncomply_code,date_format
 
 logger = logging.getLogger(__name__)
 url = utils.get_url()
@@ -47,23 +48,47 @@ def today_entrusts(entrust_no):
     return utils.http_json_post(url, {"action": "today_entrusts", "entrust_no": entrust_no})
 
 
+@date_format(format='%Y-%m-%d')
+def get_stock_price_from_baostock(code, signal_date):
+    # http://baostock.com/baostock/index.php/Python_API%E6%96%87%E6%A1%A3#.E8.8E.B7.E5.8F.96.E5.8E.86.E5.8F.B2A.E8.82.A1K.E7.BA.BF.E6.95.B0.E6.8D.AE.EF.BC.9Aquery_history_k_data_plus.28.29
+    # 获得这只股票的当日价格(不能直接调用database，那个后复权数据，得要市价）
+    lg = bs.login()
+    # 从tushare获得？还是读easy_trader呢？还是从tushare获得靠谱点
+    # data = bs.query_history_k_data_plus(utils.compile_stock_code_left(code),
+    #         "date,time,code,open,high,low,close,volume,amount,adjustflag",
+    #         start_date=signal_date, end_date=signal_date,
+    #         frequency='d', adjustflag="3")
+    data = bs.query_history_k_data_plus(utils.compile_stock_code_left(code),
+                 "close",start_date='2022-08-18',end_date='2022-08-18')
+    logger.info("从baostock获取原始数据为{}".format(data))
+    targetData = []
+    while (data.error_code == "0") & data.next():
+        targetData.append(data.get_row_data())
+    result = pd.DataFrame(targetData, columns=data.fields)
+    # 这里还是不要打印了因为数据量比较大，会比较耗时间
+    print(result)
+    if len(targetData) == 1:
+        return float(targetData[0][0])
+
+
 @uncomply_code
 def get_stock_price_from_tushuare(code, signal_date):
     # 获得这只股票的当日价格(不能直接调用database，那个后复权数据，得要市价）
     # 从tushare获得？还是读easy_trader呢？还是从tushare获得靠谱点
     df = utils.tushare_api().daily(stock_code=code,
-                                  start_date=signal_date,
-                                  end_date=signal_date,
-                                  adjust=None)
+                                   start_date=signal_date,
+                                   end_date=signal_date,
+                                   adjust=None)
     if len(df) == 1:
-        logger.warning("从tushare，获得股票[%s]目标日[%s]的收盘价：%.2f", code, signal_date, df.iloc[0]['close'])
+        logger.warning("从tushare，获得股票[%s]目标日[%s]的收盘价：%.2f",
+                       code, signal_date, df.iloc[0]['close'])
         return df.iloc[0]['close']
 
     if len(df) == 0:
         df = utils.tushare_api().daily(stock_code=utils.compile_stock_code(code),
-                                      start_date=utils.last_week(signal_date),
-                                      end_date=signal_date,
-                                      adjust=None)
+                                       start_date=utils.last_week(signal_date),
+                                       end_date=signal_date,
+                                       adjust=None)
         assert len(df) > 0
         df = df.sort_values(by='datetime')
         s = df.iloc[-1]
@@ -99,7 +124,7 @@ def __buy(code, action, signal_date, strategy):
     cash = min(ideal_cash, current_cash)
     logger.info("这只股票配置（根据仓位控制）现金为：%.2f", cash)
 
-    price = get_stock_price_from_tushuare(code, signal_date)
+    price = get_stock_price_from_baostock(code, signal_date)
     logger.info("股票[%s]目标价格为：%.2f", code, price)
 
     # 按照一个保守价格来买入，且是100的整数倍
@@ -118,7 +143,8 @@ def __buy(code, action, signal_date, strategy):
                 "signal_date": signal_date,
                 "strategy": strategy}
     result = utils.http_json_post(url, buy_data)
-    logger.debug("股票[%s]的[%s]动作提交到服务器返回：code:%d,msg:%s", code, action, result['code'], result['msg'])
+    logger.debug("股票[%s]的[%s]动作提交到服务器返回：code:%d,msg:%s",
+                 code, action, result['code'], result['msg'])
     return result
 
 
@@ -130,7 +156,8 @@ def buy_now(code):
     :return:
     """
 
-    result = __buy(code, action='buy_now', signal_date=utils.today())
+    result = __buy(code, action='buy_now',
+                   signal_date=utils.today(), strategy='')
     if result is None:
         logger.error("股票[%s]买单失败", code)
         return False
@@ -174,7 +201,8 @@ def buy(code, signal_date, strategy):
     :param code:
     :return:
     """
-    result = __buy(code, action='buy', signal_date=signal_date, strategy=strategy)
+    result = __buy(code, action='buy',
+                   signal_date=signal_date, strategy=strategy)
     if result and result['code'] == 0:
         logger.info("股票[%s]买入请求已经提交到服务器", code)
         return True
@@ -196,7 +224,8 @@ def sell_now(code):
 
     data = {"action": 'sell_now', "code": code}
     result = utils.http_json_post(url, data)
-    logger.debug("股票[%s]的卖出动作提交到服务器返回：code:%d,msg:%s", code, result['code'], result['msg'])
+    logger.debug("股票[%s]的卖出动作提交到服务器返回：code:%d,msg:%s",
+                 code, result['code'], result['msg'])
     if result.get('code', None) and result['code'] != 0:
         logger.error("股票[%s]卖单失败，原因：%s", code, result['msg'])
         return False
@@ -214,9 +243,11 @@ def sell(code, share):
         logger.error("股票[%s]已经不在仓位中，无法卖出", code)
         return False
 
-    buy_data = {"action": "sell", "code": code, "share": share, "signal_date": utils.today()}
+    buy_data = {"action": "sell", "code": code,
+                "share": share, "signal_date": utils.today()}
     result = utils.http_json_post(url, buy_data)
-    logger.debug("股票[%s]的卖出动作提交到服务器，返回：code:%d,msg:%s", code, result['code'], result['msg'])
+    logger.debug("股票[%s]的卖出动作提交到服务器，返回：code:%d,msg:%s",
+                 code, result['code'], result['msg'])
     if result and result['code'] == 0:
         logger.info("股票卖出请求，正确提交到服务器了")
         return True

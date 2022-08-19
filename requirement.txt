@@ -24,3 +24,4 @@ ipdb==0.13.9
 
 python-Levenshtein
 pycryptodome
+flask
